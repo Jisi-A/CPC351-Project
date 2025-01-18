@@ -8,14 +8,17 @@ library(car)
 
 weather_data <- read.csv("dataset/06_Weather.csv")
 
+# Check data structure
 str(weather_data)
 summary(weather_data)
 head(weather_data)
 
+# Convert to proper timestamp format
 weather_data$LocalTimestampConverted <- mdy_hm(weather_data$LocalTimestamp)
 str(weather_data)
 summary(weather_data)
 
+# Convert DeviceID to factor
 weather_data$DeviceID <- as.factor(weather_data$DeviceID)
 str(weather_data)
 summary(weather_data)
@@ -40,7 +43,7 @@ ggplot(weather_data, aes(x = LocalTimestampConverted, y = AirTemperature)) +
   ) +
   theme_minimal()
 
-# Distribution of Air Temperature by Device
+# Distribution of Air Temperature by DeviceID
 ggplot(weather_data, aes(x = AirTemperature)) +
   geom_histogram(bins = 30, fill = "skyblue") +
   facet_wrap(~DeviceID) +
@@ -62,7 +65,7 @@ ggplot(weather_data, aes(x = LocalTimestampConverted, y = BarometricPressure)) +
   ) +
   theme_minimal()
 
-# Distribution of Barometric Pressure
+# Distribution of Barometric Pressure by DeviceID
 ggplot(weather_data, aes(x = BarometricPressure)) +
   geom_histogram(bins = 30, fill = "darkred", alpha = 0.7) +
   facet_wrap(~DeviceID) +
@@ -73,7 +76,7 @@ ggplot(weather_data, aes(x = BarometricPressure)) +
   ) +
   theme_minimal()
 
-# Plot Relative Humidity over time
+# Plot Relative Humidity over time by DeviceID
 ggplot(weather_data, aes(x = LocalTimestampConverted, y = RelativeHumidity)) +
   geom_line(color = "darkgreen") +
   facet_wrap(~DeviceID) +
@@ -84,7 +87,7 @@ ggplot(weather_data, aes(x = LocalTimestampConverted, y = RelativeHumidity)) +
   ) +
   theme_minimal()
 
-# Distribution of Relative Humidity
+# Distribution of Relative Humidity by DeviceID
 ggplot(weather_data, aes(x = RelativeHumidity)) +
   geom_histogram(bins = 30, fill = "darkgreen", alpha = 0.7) +
   facet_wrap(~DeviceID) +
@@ -95,10 +98,12 @@ ggplot(weather_data, aes(x = RelativeHumidity)) +
   ) +
   theme_minimal()
 
+# Filter data for each device
 weather_data_D1 <- weather_data %>% filter(DeviceID == "18zua9muwbb")
 weather_data_D2 <- weather_data %>% filter(DeviceID == "2hq3byfebne")
 weather_data_D3 <- weather_data %>% filter(DeviceID == "uu90853psl")
 
+# Check summary of each device
 summary(weather_data_D1)
 summary(weather_data_D2)
 summary(weather_data_D3)
