@@ -315,3 +315,6 @@ ggplot(hourly_D3, aes(x = BarometricPressure, y = AirTemperature)) +
     y = "Air Temperature"
   ) +
   theme_minimal()
+
+# Save processed hourly_D3 data to CSV
+write.csv(hourly_D3, "dataset/processed_hourly_D3.csv", row.names = FALSE)
