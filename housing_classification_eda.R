@@ -5,6 +5,7 @@ library(tidyr)
 library(caret)
 library(corrplot)
 library(randomForest)
+library(smotefamily)  # For SMOTE
 
 # Read the data
 housing_data <- read.csv("dataset/05_Social_Housing.csv")
@@ -16,212 +17,200 @@ str(housing_data)
 # print the first 10 rows of the dataset
 print(head(housing_data, 10))
 
-# ============= Data Preprocessing =============
-# Function to convert flag columns to numeric
-convert_flag_to_numeric <- function(x) {
-  case_when(
-    x == "Yes" ~ 1,
-    x == "No" ~ 0,
-    x == "U" ~ NA_real_,
-    x == "n.a." ~ NA_real_
-  )
+summary(housing_data)
+
+# ============= Data Preprocessing Functions =============
+# Function to convert flag columns to binary factors
+convert_flag_to_factor <- function(x) {
+  factor(case_when(
+    x == "Yes" | x == "Y" ~ "Yes",
+    x == "No" | x == "N" ~ "No",
+    x == "U" | x == "n.a." | x == "" ~ NA_character_,
+    TRUE ~ NA_character_
+  ), levels = c("No", "Yes"))
 }
 
-# Function to handle NA values in character columns
-handle_na <- function(x) {
-  ifelse(x == "n.a." | x == "U" | x == "", NA, x)
+# Function to calculate mode for NA imputation
+calculate_mode <- function(x) {
+  if (is.factor(x)) {
+    # Get the most frequent non-NA value
+    freq_table <- table(x, useNA = "no")
+    if (length(freq_table) == 0) return(levels(x)[1])  # Default to first level if all NA
+    return(names(freq_table)[which.max(freq_table)])
+  } else if (is.numeric(x)) {
+    ux <- unique(x[!is.na(x)])
+    if (length(ux) == 0) return(0)  # Default to 0 if all NA
+    ux[which.max(tabulate(match(x, ux)))]
+  } else {
+    x <- as.character(x)
+    ux <- unique(x[!is.na(x)])
+    if (length(ux) == 0) return(NA_character_)
+    ux[which.max(tabulate(match(x, ux)))]
+  }
 }
 
-# Preprocess all data first
+# ============= Initial Data Preprocessing =============
+summary(housing_data)
+
+# Drop row_id column as it is not useful for the model
 preprocessed_data <- housing_data %>%
+  select(-c(row_id))
+
+# Drop columns that we are certain are not useful for the model
+preprocessed_data <- preprocessed_data %>%
+  select(-c(ApplicationReceivedMonth, LocalGovtAuthority, StateElectorate, HousingServiceCentre))
+
+# First stage of preprocessing
+preprocessed_data <- preprocessed_data %>%
   mutate(
     # Convert target variable to binary
     Status = ifelse(ApplicationListStatusDesc == "ACTIVE", 1, 0),
-    Status = as.factor(Status),
+    Status = factor(Status, levels = c(0, 1)),
     
-    # Convert flag columns to numeric
-    DisabilityMod = convert_flag_to_numeric(DisabilityModRequestFlag),
-    Homelessness = convert_flag_to_numeric(AtRiskOfOrExperiencingHomelessnessFlag),
-    Disability = convert_flag_to_numeric(DisabilityApplicationFlag),
-    Indigenous = convert_flag_to_numeric(IndigenousApplicationFlag),
+    # Convert flag columns directly to binary factors
+    DisabilityMod = convert_flag_to_factor(DisabilityModRequestFlag),
+    Homelessness = convert_flag_to_factor(AtRiskOfOrExperiencingHomelessnessFlag),
+    Disability = convert_flag_to_factor(DisabilityApplicationFlag),
+    Indigenous = convert_flag_to_factor(IndigenousApplicationFlag),
     
     # Convert numeric columns
     BedroomsRequired = as.numeric(BedroomsRequired),
     MonthsOnRegister = as.numeric(MonthsOnHousingRegister),
-    PeopleCount = as.numeric(PeopleonApplication)
+    PeopleCount = as.numeric(PeopleonApplication),
+
+    # Convert character columns to factors
+    ApplicationListStatusDesc = factor(ApplicationListStatusDesc),
+    ApplicationType = factor(ApplicationType),
+    FamilyType = factor(FamilyType),
+    LanguagePreference = factor(LanguagePreference),
+    LettingArea1Desc = factor(LettingArea1Desc),
+    LettingArea2Desc = factor(LettingArea2Desc),
+    LettingArea3Desc = factor(LettingArea3Desc),
+    LettingArea4Desc = factor(LettingArea4Desc),
+    LettingArea5Desc = factor(LettingArea5Desc),
+    LettingArea6Desc = factor(LettingArea6Desc),
+    ApplicationListCategory = factor(ApplicationListCategory),
+    RehousingListDesc = factor(RehousingListDesc),
+    LanguagePreference = factor(LanguagePreference)
   )
 
-# Handle NA values in character columns and convert to factors
+# Drop columns that we have already renamed after converting to factors or numeric previously
 preprocessed_data <- preprocessed_data %>%
-  mutate(across(where(is.character), handle_na)) %>%
-  mutate(across(where(is.character), as.factor))
-
-# Convert LettingArea1Desc ... LettingArea6Desc to factor
-preprocessed_data <- preprocessed_data %>%
-  mutate(across(starts_with("LettingArea"), as.factor))
-
-# Print summary of preprocessed data
-summary(preprocessed_data)
-
-# Drop columns that:
-# 1. we judge are not needed (row_id, ApplicationListCategory, RehousingListDesc, LettingArea1Desc ... LettingArea6Desc, ApplicationReceivedMonth, StateElectorate, HousingServiceCentre, LocalGovtAuthority)
-# 2. have already been renamed during the first preprocessing
-preprocessed_data <- preprocessed_data %>%
-  select(-c(row_id, ApplicationListCategory, RehousingListDesc, 
+  select(-c( 
             DisabilityModRequestFlag, AtRiskOfOrExperiencingHomelessnessFlag, 
-            DisabilityApplicationFlag, IndigenousApplicationFlag, MonthsOnHousingRegister, PeopleonApplication, ApplicationListStatusDesc, LettingArea1Desc, LettingArea2Desc, LettingArea3Desc, LettingArea4Desc, LettingArea5Desc, LettingArea6Desc, ApplicationReceivedMonth, StateElectorate, HousingServiceCentre, LocalGovtAuthority))
+            DisabilityApplicationFlag, IndigenousApplicationFlag, MonthsOnHousingRegister, PeopleonApplication, ApplicationListStatusDesc
+            ))
 
 summary(preprocessed_data)
 
-# Check missing values
-cat("\nMissing Values after preprocessing:\n")
-colSums(is.na(preprocessed_data))
+# show number of unique values for each column
+print(sapply(preprocessed_data, function(x) length(unique(x))))
 
-# Drop LanguagePreference because it is unlikely to be a good predictor and has too many missing values
-cat("\nPercentage of missing values in LanguagePreference:\n")
-mean(is.na(preprocessed_data$LanguagePreference)) # 96.94327% missing values
+# Drop applicaiton list category because the values are not useful for the model
 preprocessed_data <- preprocessed_data %>%
-  select(-LanguagePreference)
+  select(-c(ApplicationListCategory))
+
+# Drop RehousingListDesc because there is only 1 unique value
+preprocessed_data <- preprocessed_data %>%
+  select(-c(RehousingListDesc))
+
+
+# drop columns with high cardinality
+preprocessed_data <- preprocessed_data %>%
+  select(-c(LettingArea1Desc, LettingArea2Desc, LettingArea3Desc, LettingArea4Desc, LettingArea5Desc, LettingArea6Desc, ApplicationType, FamilyType))
+
+
+# remove LanguagePreference because it has too many n.a. values (24452)
+preprocessed_data <- preprocessed_data %>%
+  select(-c(LanguagePreference))
+
+summary(preprocessed_data)
+
+# ============= Handle Missing Values =============
+# Check for missing values
+cat("\nMissing values before imputation:\n")
+print(colSums(is.na(preprocessed_data)))
+
+# Handle missing values while preserving data types
+preprocessed_data <- preprocessed_data %>%
+  mutate(
+    # Handle flag columns first
+    DisabilityMod = {
+      mode_val <- calculate_mode(DisabilityMod)
+      cat("\nMode value for DisabilityMod:", mode_val, "\n")
+      factor(ifelse(is.na(DisabilityMod), mode_val, as.character(DisabilityMod)), 
+             levels = c("No", "Yes"))
+    },
+    
+    Homelessness = {
+      mode_val <- calculate_mode(Homelessness)
+      cat("Mode value for Homelessness:", mode_val, "\n")
+      factor(ifelse(is.na(Homelessness), mode_val, as.character(Homelessness)), 
+             levels = c("No", "Yes"))
+    },
+    
+    Disability = {
+      mode_val <- calculate_mode(Disability)
+      cat("Mode value for Disability:", mode_val, "\n")
+      factor(ifelse(is.na(Disability), mode_val, as.character(Disability)), 
+             levels = c("No", "Yes"))
+    },
+    
+    Indigenous = {
+      mode_val <- calculate_mode(Indigenous)
+      cat("Mode value for Indigenous:", mode_val, "\n")
+      factor(ifelse(is.na(Indigenous), mode_val, as.character(Indigenous)), 
+             levels = c("No", "Yes"))
+    },
+    
+    # Handle numeric columns
+    across(c(BedroomsRequired, MonthsOnRegister, PeopleCount), ~{
+      if(any(is.na(.))) {
+        med_val <- median(., na.rm = TRUE)
+        ifelse(is.na(.), med_val, .)
+      } else .
+    })
+  )
+
+# Verify missing values are handled
+cat("\nMissing values after imputation:\n")
+print(colSums(is.na(preprocessed_data)))
+
+summary(preprocessed_data)
 
 # ============= Feature Selection Analysis =============
-# 1. Chi-square test for categorical variables
-categorical_features <- names(preprocessed_data)[sapply(preprocessed_data, is.factor)]
-
-# exclude Status from the categorical features as it is the target variable
-categorical_features <- setdiff(categorical_features, c("Status"))
-
-chi_square_results <- data.frame(
-  Feature = character(),
-  ChiSquare = numeric(),
-  PValue = numeric(),
-  stringsAsFactors = FALSE
-)
-
-for(feature in categorical_features) {
-  chi_test <- chisq.test(table(preprocessed_data[[feature]], 
-                              preprocessed_data$Status))
-  chi_square_results <- rbind(chi_square_results,
-                             data.frame(Feature = feature,
-                                      ChiSquare = chi_test$statistic,
-                                      PValue = chi_test$p.value))
-}
-
-# View warnings from chi-square test
-warnings()
-
-# 2. Correlation analysis for numeric variables
+# Correlation analysis for numeric variables
 numeric_features <- names(preprocessed_data)[sapply(preprocessed_data, is.numeric)]
+correlation_matrix <- cor(preprocessed_data[numeric_features], use = "pairwise.complete.obs")
 
-correlation_matrix <- cor(preprocessed_data[numeric_features], 
-                        use = "pairwise.complete.obs")
+# Plot correlation matrix
+corrplot(correlation_matrix, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45, tl.cex = 0.7, tl.offset = 0.5)
 
-# View correlation matrix
-print(correlation_matrix)
-
-# plot the correlation matrix
-corrplot(correlation_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45, tl.cex = 0.7, tl.offset = 0.5)
-
-# Since PeopleCount is highly correlated with BedroomsRequired, we can drop PeopleCount
+# Drop highly correlated features
 preprocessed_data <- preprocessed_data %>%
-  select(-PeopleCount)
+  select(-PeopleCount)  # PeopleCount is highly correlated with BedroomsRequired
 
-# 3. Random Forest for feature importance
-# Prepare data for random forest - keep factors as factors
-rf_data <- preprocessed_data %>%
-  select_if(~!all(is.na(.)))  # Remove columns with all NA
-
-# Handle NA values
-# First, let's see how many NAs we have in each column
-cat("\nNA counts in RF data before handling:\n")
-print(colSums(is.na(rf_data)))
-
-# Impute NA values
-# For numeric columns: replace NA with median
-# For categorical/factor columns: replace NA with mode
-impute_na <- function(x) {
-  if(is.numeric(x)) {
-    replace(x, is.na(x), median(x, na.rm = TRUE))
-  } else if(is.factor(x)) {
-    # For factor columns, replace with mode
-    mode_val <- levels(x)[which.max(table(x))]
-    x[is.na(x)] <- mode_val
-    x
-  } else {
-    x  # Return unchanged if neither numeric nor factor
-  }
-}
-
-rf_data_imputed <- rf_data %>%
-  mutate(across(everything(), impute_na))
-
-# Verify no more NAs
-cat("\nNA counts after imputation:\n")
-print(colSums(is.na(rf_data_imputed)))
-
-# Split features and target
-rf_features <- rf_data_imputed %>% select(-Status)
-rf_target <- rf_data_imputed$Status
-
-summary(rf_data_imputed)
-
-# Before Random Forest, check cardinality of factor columns
-cat("\nNumber of levels in each factor column:\n")
-factor_levels <- sapply(rf_features, function(x) if(is.factor(x)) length(levels(x)) else 0)
-print(factor_levels[factor_levels > 0])
-
-# Function to handle high cardinality factors
-handle_high_cardinality <- function(x, threshold = 52) {
-  if(is.factor(x) && length(levels(x)) > threshold) {
-    # Get frequency table
-    freq_table <- table(x)
-    # Keep top categories and group others
-    top_categories <- names(sort(freq_table, decreasing = TRUE)[1:threshold])
-    x <- as.character(x)
-    x[!(x %in% top_categories)] <- "Other"
-    return(factor(x))
-  }
-  return(x)
-}
-
-# Apply high cardinality handling
-rf_features <- rf_features %>%
-  mutate(across(where(is.factor), ~handle_high_cardinality(.)))
-
-# Verify the changes
-cat("\nNumber of levels after handling high cardinality:\n")
-factor_levels_after <- sapply(rf_features, function(x) if(is.factor(x)) length(levels(x)) else 0)
-print(factor_levels_after[factor_levels_after > 0])
-
-# Run Random Forest with modified factors
+# Random Forest for feature importance
 set.seed(123)
-rf_model <- randomForest(x = rf_features, 
-                        y = rf_target,
+
+# Prepare data for random forest
+rf_data <- preprocessed_data %>% select(-Status)  # Features only
+
+# Train Random Forest model
+rf_model <- randomForest(x = rf_data, 
+                        y = preprocessed_data$Status,
                         importance = TRUE)
+
+# Print feature importance
+cat("\nFeature Importance (by Gini decrease):\n")
 importance_scores <- importance(rf_model)
+print(importance_scores[order(importance_scores[,"MeanDecreaseGini"], decreasing = TRUE), ])
 
-# Print feature importance in descending order
-print("\nFeature Importance:")
+# ============= Create Final Dataset =============
+# Select top features based on Random Forest importance
+selected_features <- rownames(importance_scores)[order(importance_scores[,"MeanDecreaseGini"], decreasing = TRUE)[1:6]]
 
-# use gini importance to measure how much each feature reduces impurity (gini) across all the trees in the forest
-# caveat: Gini importance may favor continuous or high-cardinality features (features with many unique values).
-print(importance_scores[order(-importance_scores[,"MeanDecreaseGini"]), ])
-
-# ============= Select Final Features =============
-# Combine results from all methods
-selected_features <- unique(c(
-  # Statistically significant categorical features based on chi-square test
-  chi_square_results$Feature[chi_square_results$PValue < 0.05],
-  
-  # Top 10 important features from Random Forest
-  head(rownames(importance_scores[order(-importance_scores[,"MeanDecreaseGini"]),]), 10),
-  
-  # Numeric features with correlation > 0.1 with Status
-  names(which(abs(cor(preprocessed_data$Status == 1, 
-                     preprocessed_data[sapply(preprocessed_data, is.numeric)],
-                     use = "pairwise.complete.obs")) > 0.1))
-))
-
-# Print selected features
 cat("\nSelected features:\n")
 print(selected_features)
 
@@ -229,95 +218,101 @@ print(selected_features)
 final_data <- preprocessed_data %>%
   select(Status, all_of(selected_features))
 
-# Save processed data
-write.csv(final_data, "dataset/processed_housing_classification.csv", row.names = FALSE)
-
-# drop ApplicationType
-final_data <- final_data %>%
-  select(-ApplicationType)
-
-# get all possible values of FamilyType
-unique(final_data$FamilyType)
-
 # Print summary of final dataset
-cat("\nFinal Dataset Structure:\n")
-str(final_data)
-cat("\nClass Distribution:\n")
-table(final_data$Status)
-
-# Function to convert FamilyType into multiple binary columns
-convert_family_type <- function(data) {
-  data %>%
-    mutate(
-      # Single (1) vs Couple (0)
-      is_single = case_when(
-        grepl("^(01|02|03|04|09)", FamilyType) ~ 1,  # Single person or single parent
-        TRUE ~ 0
-      ),
-      
-      # Has children (1) vs No children (0)
-      has_children = case_when(
-        grepl("(Parent|Children)", FamilyType) ~ 1,
-        TRUE ~ 0
-      ),
-      
-      # Number of children: 0, 1, 2, 3
-      # no need to convert to factor as it is already a numeric column
-      children_count = case_when(
-        grepl("Parent, 1 Child|Couple, 1 Child", FamilyType) ~ 1,
-        grepl("Parent, 2 Children|Couple, 2 Children", FamilyType) ~ 2,
-        grepl("Parent, 3 Children|Couple, 3 Children", FamilyType) ~ 3,
-        TRUE ~ 0
-      ),
-      
-      # Senior (1) vs Non-senior (0)
-      is_senior = case_when(
-        grepl("Over 55", FamilyType) ~ 1,
-        TRUE ~ 0
-      )
-    ) %>%
-    mutate(
-      # Convert to factors but keep 0/1 as levels
-      is_single = factor(is_single, levels = c(0, 1)),
-      has_children = factor(has_children, levels = c(0, 1)),
-      is_senior = factor(is_senior, levels = c(0, 1))
-    ) %>%
-    select(-FamilyType)  # Remove original FamilyType column
-}
-
-# Apply the conversion
-final_data <- final_data %>%
-  convert_family_type()
-
-# convert other columns to binary factors
-final_data <- final_data %>%
-  mutate(across(c(Disability, Homelessness, DisabilityMod, Indigenous), 
-                ~factor(., levels = c(0, 1))))
-
-# Print summary of the new features
-cat("\nSummary of new family type features:\n")
+cat("\nFinal dataset summary:\n")
 summary(final_data)
 
-# Print distributions of binary variables
-cat("\nDistributions of family type features:\n")
-cat("\nSingle vs Couple (1 = Single):\n")
-table(final_data$is_single)
-cat("\nHas Children (1 = Yes):\n")
-table(final_data$has_children)
-cat("\nChildren Count (0 = None, 1 = One, 2 = Two, 3 = Three or More):\n")
-table(final_data$children_count)
-cat("\nSenior Status (1 = Senior):\n")
-table(final_data$is_senior)
+# ============= Handle Class Imbalance with SMOTE =============
+cat("\nImplementing SMOTE...\n")
 
-# undersampling the majority class
-final_data <- final_data %>%
-  group_by(Status) %>%
-  sample_n(size = min(table(final_data$Status)), replace = FALSE) %>%
-  ungroup()
+# Prepare data for SMOTE
+X <- final_data %>% 
+  select(-Status) %>%
+  mutate(across(everything(), ~{
+    if (is.factor(.)) {
+      # Convert factors to numeric (0/1) based on levels
+      as.numeric(.) - 1  # Converts factor levels to 0-based numeric
+    } else {
+      # For numeric columns, scale to [0,1] range
+      (. - min(.)) / (max(.) - min(.))
+    }
+  })) %>%
+  as.matrix()
 
-# Print summary of the new dataset
-cat("\nSummary of the new dataset after undersampling:\n")
-summary(final_data)
+# Print the structure of X to verify conversion
+cat("\nStructure of features matrix X:\n")
+str(X)
+cat("\nSummary of features matrix X:\n")
+print(summary(as.data.frame(X)))
 
-# Save the final processed data
+y <- final_data$Status
+
+# Print class distribution before SMOTE
+cat("\nClass distribution before SMOTE:\n")
+print(table(y))
+
+# Apply SMOTE with error handling
+tryCatch({
+  # Calculate appropriate dup_size
+  n_majority <- max(table(y))
+  n_minority <- min(table(y))
+  dup_size <- ceiling(n_majority/n_minority)
+  
+  smote_result <- SMOTE(X = X,
+                        target = y,
+                        K = 5,
+                        dup_size = dup_size)
+  
+  # Convert SMOTE result back to data frame
+  balanced_data <- as.data.frame(smote_result$data)
+  colnames(balanced_data)[ncol(balanced_data)] <- "Status"
+  colnames(balanced_data)[1:(ncol(balanced_data)-1)] <- colnames(X)
+  
+  # Convert back to original data types
+  final_data_balanced <- balanced_data %>%
+    mutate(
+      Status = factor(Status, levels = c(0, 1)),
+      across(names(final_data)[names(final_data) != "Status"], ~{
+        if (is.factor(final_data[[cur_column()]])) {
+          # For columns that were originally factors
+          factor(ifelse(. >= 0.5, "Yes", "No"), levels = c("No", "Yes"))
+        } else {
+          # For columns that were originally numeric
+          # Rescale back to original range
+          orig_col <- final_data[[cur_column()]]
+          orig_min <- min(orig_col)
+          orig_max <- max(orig_col)
+          round(. * (orig_max - orig_min) + orig_min)
+        }
+      })
+    )
+  
+  cat("\nClass distribution after SMOTE:\n")
+  print(table(final_data_balanced$Status))
+  
+}, error = function(e) {
+  cat("\nError in SMOTE process:", conditionMessage(e))
+  cat("\nFalling back to simple oversampling...\n")
+  
+  # Simple oversampling of minority class
+  minority_class <- which.min(table(y))
+  majority_class <- which.max(table(y))
+  minority_indices <- which(y == levels(y)[minority_class])
+  majority_indices <- which(y == levels(y)[majority_class])
+  
+  sampled_minority <- sample(minority_indices, 
+                           size = length(majority_indices), 
+                           replace = TRUE)
+  
+  balanced_indices <- c(majority_indices, sampled_minority)
+  final_data_balanced <- final_data[balanced_indices, ]
+})
+
+# ============= Save Final Datasets =============
+# Save both original and balanced datasets
 write.csv(final_data, "dataset/processed_housing_classification.csv", row.names = FALSE)
+write.csv(final_data_balanced, "dataset/processed_housing_classification_balanced.csv", row.names = FALSE)
+
+cat("\nDatasets saved successfully:")
+cat("\n1. Original dataset:", nrow(final_data), "samples")
+cat("\n2. Balanced dataset:", nrow(final_data_balanced), "samples\n")
