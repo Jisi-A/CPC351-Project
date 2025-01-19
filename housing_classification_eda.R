@@ -225,90 +225,103 @@ summary(final_data)
 # ============= Handle Class Imbalance with SMOTE =============
 cat("\nImplementing SMOTE...\n")
 
-# Prepare data for SMOTE
-X <- final_data %>% 
-  select(-Status) %>%
+# Convert data to numeric format for SMOTE
+numeric_data <- final_data %>%
   mutate(across(everything(), ~{
     if (is.factor(.)) {
-      # Convert factors to numeric (0/1) based on levels
-      as.numeric(.) - 1  # Converts factor levels to 0-based numeric
+      as.numeric(.) - 1
     } else {
-      # For numeric columns, scale to [0,1] range
-      (. - min(.)) / (max(.) - min(.))
+      scale(as.numeric(.), center = TRUE, scale = TRUE)[,1]  # Scale numeric features
     }
-  })) %>%
+  }))
+
+# Separate features and target
+X <- numeric_data %>% 
+  select(-Status) %>%
   as.matrix()
 
-# Print the structure of X to verify conversion
-cat("\nStructure of features matrix X:\n")
-str(X)
-cat("\nSummary of features matrix X:\n")
-print(summary(as.data.frame(X)))
-
-y <- final_data$Status
+y <- as.numeric(numeric_data$Status) - 1  # Convert to 0-based
 
 # Print class distribution before SMOTE
 cat("\nClass distribution before SMOTE:\n")
 print(table(y))
 
-# Apply SMOTE with error handling
-tryCatch({
-  # Calculate appropriate dup_size
-  n_majority <- max(table(y))
-  n_minority <- min(table(y))
-  dup_size <- ceiling(n_majority/n_minority)
-  
-  smote_result <- SMOTE(X = X,
+# Calculate SMOTE parameters
+n_minority <- min(table(y))
+n_majority <- max(table(y))
+K <- min(5, n_minority - 1)  # Number of nearest neighbors
+dup_size <- ceiling(n_majority/n_minority)  # How many times to oversample minority class
+
+cat("\nSMOTE parameters:")
+cat("\nMinority class size:", n_minority)
+cat("\nMajority class size:", n_majority)
+cat("\nK value:", K)
+cat("\nDuplication size:", dup_size, "\n")
+
+# Try SMOTE first, fallback to random sampling if it fails
+final_data_balanced <- tryCatch({
+  # Apply SMOTE
+  set.seed(123)  # For reproducibility
+  smote_result <- SMOTE(X = X, 
                         target = y,
-                        K = 5,
+                        K = K,
                         dup_size = dup_size)
   
-  # Convert SMOTE result back to data frame
+  cat("\nSMOTE successful. Converting results back to original format...\n")
+  
+  # Convert SMOTE result back to data frame with proper column names
   balanced_data <- as.data.frame(smote_result$data)
-  colnames(balanced_data)[ncol(balanced_data)] <- "Status"
-  colnames(balanced_data)[1:(ncol(balanced_data)-1)] <- colnames(X)
+  colnames(balanced_data) <- c(colnames(X), "Status")
   
   # Convert back to original data types
-  final_data_balanced <- balanced_data %>%
+  balanced_data <- balanced_data %>%
     mutate(
+      # Convert Status back to factor
       Status = factor(Status, levels = c(0, 1)),
+      # Handle each feature
       across(names(final_data)[names(final_data) != "Status"], ~{
-        if (is.factor(final_data[[cur_column()]])) {
+        col_name <- cur_column()
+        if (is.factor(final_data[[col_name]])) {
           # For columns that were originally factors
           factor(ifelse(. >= 0.5, "Yes", "No"), levels = c("No", "Yes"))
         } else {
-          # For columns that were originally numeric
-          # Rescale back to original range
-          orig_col <- final_data[[cur_column()]]
-          orig_min <- min(orig_col)
-          orig_max <- max(orig_col)
-          round(. * (orig_max - orig_min) + orig_min)
+          # For numeric columns, unscale the values
+          . * sd(final_data[[col_name]]) + mean(final_data[[col_name]])
         }
       })
     )
   
-  cat("\nClass distribution after SMOTE:\n")
-  print(table(final_data_balanced$Status))
+  balanced_data
   
 }, error = function(e) {
-  cat("\nError in SMOTE process:", conditionMessage(e))
-  cat("\nFalling back to simple oversampling...\n")
+  cat("\nSMOTE failed with error:", conditionMessage(e))
+  cat("\nFalling back to random sampling...\n")
   
-  # Simple oversampling of minority class
-  minority_class <- which.min(table(y))
-  majority_class <- which.max(table(y))
-  minority_indices <- which(y == levels(y)[minority_class])
-  majority_indices <- which(y == levels(y)[majority_class])
+  # Get indices for minority and majority classes
+  class_table <- table(final_data$Status)
+  minority_class <- names(class_table)[which.min(class_table)]
+  majority_class <- names(class_table)[which.max(class_table)]
   
-  sampled_minority <- sample(minority_indices, 
-                           size = length(majority_indices), 
-                           replace = TRUE)
+  minority_indices <- which(final_data$Status == minority_class)
+  majority_indices <- which(final_data$Status == majority_class)
   
-  balanced_indices <- c(majority_indices, sampled_minority)
-  final_data_balanced <- final_data[balanced_indices, ]
+  # Sample minority class with replacement to match majority class size
+  set.seed(123)  # For reproducibility
+  sampled_minority_indices <- sample(minority_indices, 
+                                   size = length(majority_indices), 
+                                   replace = TRUE)
+  
+  # Combine indices
+  balanced_indices <- c(majority_indices, sampled_minority_indices)
+  
+  # Return balanced dataset
+  final_data[balanced_indices, ]
 })
 
-# ============= Save Final Datasets =============
+# Print final class distribution
+cat("\nClass distribution after balancing:\n")
+print(table(final_data_balanced$Status))
+
 # Save both original and balanced datasets
 write.csv(final_data, "dataset/processed_housing_classification.csv", row.names = FALSE)
 write.csv(final_data_balanced, "dataset/processed_housing_classification_balanced.csv", row.names = FALSE)
