@@ -342,25 +342,3 @@ write.csv(hourly_D3, "dataset/processed_hourly_D3.csv", row.names = FALSE)
 # Check if timestamps are strictly increasing
 is_ordered <- all(diff(weather_data$LocalTimestampConverted) > 0)
 print(paste("Timestamps are strictly ascending:", is_ordered))
-
-# Get the time differences between consecutive timestamps
-time_diffs <- diff(weather_data$LocalTimestampConverted)
-summary(time_diffs)
-
-# Check for any negative time differences (indicating out of order timestamps)
-any_backwards <- any(time_diffs <= 0)
-print(paste("Any backwards timestamps:", any_backwards))
-
-# Optional: Look at the actual intervals between measurements
-# Convert time differences to minutes for easier interpretation
-time_diffs_minutes <- as.numeric(time_diffs, units="mins")
-table(time_diffs_minutes)
-
-# Optional: If you want to see where any irregularities occur
-if(any_backwards) {
-  problem_indices <- which(time_diffs <= 0)
-  print("Problem locations:")
-  print(weather_data[c(problem_indices, problem_indices + 1), 
-                    c("LocalTimestampConverted", "DeviceID")])
-}
-
