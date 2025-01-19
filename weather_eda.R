@@ -23,14 +23,14 @@ weather_data$DeviceID <- as.factor(weather_data$DeviceID)
 str(weather_data)
 summary(weather_data)
 
-# Extract time-based features from LocalTimestamp
-weather_data <- weather_data %>%
-  mutate(
-    hour = hour(LocalTimestampConverted),
-    day = day(LocalTimestampConverted),
-    month = month(LocalTimestampConverted),
-    weekday = wday(LocalTimestampConverted, label = TRUE)
-  )
+# Extract time-based features from LocalTimestamp 
+# weather_data <- weather_data %>%
+#   mutate(
+#     hour = hour(LocalTimestampConverted),
+#     day = day(LocalTimestampConverted),
+#     month = month(LocalTimestampConverted),
+#     weekday = wday(LocalTimestampConverted, label = TRUE)
+#   )
 
 # Plot Air Temperature over time by DeviceID
 ggplot(weather_data, aes(x = LocalTimestampConverted, y = AirTemperature)) +
@@ -108,12 +108,27 @@ summary(weather_data_D1)
 summary(weather_data_D2)
 summary(weather_data_D3)
 
+# Print out number of rows and date ranges for each device
+cat("Number of rows and date ranges for each device:\n",
+    "Device 1 (18zua9muwbb):", nrow(weather_data_D1), "rows\n",
+    "  Date range:", format(min(weather_data_D1$LocalTimestampConverted), "%Y-%m-%d %H:%M"), "to", 
+    format(max(weather_data_D1$LocalTimestampConverted), "%Y-%m-%d %H:%M"), "\n\n",
+    "Device 2 (2hq3byfebne):", nrow(weather_data_D2), "rows\n",
+    "  Date range:", format(min(weather_data_D2$LocalTimestampConverted), "%Y-%m-%d %H:%M"), "to", 
+    format(max(weather_data_D2$LocalTimestampConverted), "%Y-%m-%d %H:%M"), "\n\n",
+    "Device 3 (uu90853psl):", nrow(weather_data_D3), "rows\n",
+    "  Date range:", format(min(weather_data_D3$LocalTimestampConverted), "%Y-%m-%d %H:%M"), "to", 
+    format(max(weather_data_D3$LocalTimestampConverted), "%Y-%m-%d %H:%M"), "\n")
+
 # Correlation Plot
 cor_matrix <-
   cor(weather_data_D3[
     , c("AirTemperature", "BarometricPressure", "RelativeHumidity")
   ])
 corrplot(cor_matrix, method = "circle")
+# Print correlation values
+print("Correlation values:")
+print(round(cor_matrix, 3))
 
 # Check for missing values
 plot_missing(weather_data_D3)
@@ -323,3 +338,7 @@ ggplot(hourly_D3, aes(x = BarometricPressure, y = AirTemperature)) +
 
 # Save processed hourly_D3 data to CSV
 write.csv(hourly_D3, "dataset/processed_hourly_D3.csv", row.names = FALSE)
+
+# Check if timestamps are strictly increasing
+is_ordered <- all(diff(weather_data$LocalTimestampConverted) > 0)
+print(paste("Timestamps are strictly ascending:", is_ordered))
