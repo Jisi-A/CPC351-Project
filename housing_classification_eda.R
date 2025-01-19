@@ -75,7 +75,7 @@ preprocessed_data <- preprocessed_data %>%
     
     # Convert numeric columns
     BedroomsRequired = as.numeric(BedroomsRequired),
-    MonthsOnRegister = as.numeric(MonthsOnHousingRegister),
+    MonthsOnRegister = as.numeric(MonthsonHousingRegister),
     PeopleCount = as.numeric(PeopleonApplication),
 
     # Convert character columns to factors
@@ -98,7 +98,7 @@ preprocessed_data <- preprocessed_data %>%
 preprocessed_data <- preprocessed_data %>%
   select(-c( 
             DisabilityModRequestFlag, AtRiskOfOrExperiencingHomelessnessFlag, 
-            DisabilityApplicationFlag, IndigenousApplicationFlag, MonthsOnHousingRegister, PeopleonApplication, ApplicationListStatusDesc
+            DisabilityApplicationFlag, IndigenousApplicationFlag, MonthsonHousingRegister, PeopleonApplication, ApplicationListStatusDesc
             ))
 
 summary(preprocessed_data)
